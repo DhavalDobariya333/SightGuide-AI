@@ -62,16 +62,11 @@ const LiveAssistant: React.FC<LiveAssistantProps> = ({
   const lastFrameDataRef = useRef<Uint8ClampedArray | null>(null);
   const lastFrameTimeRef = useRef<number>(0);
 
-  // Reconnection & Gestures
+  // Reconnection
   const retryCountRef = useRef(0);
   const MAX_RETRIES = 5;
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  
-  // Gesture Refs
-  const touchStartRef = useRef<{x: number, y: number, time: number} | null>(null);
-  const lastTapTimeRef = useRef<number>(0);
-  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const isActive = appState === 'running' || appState === 'starting' || appState === 'paused';
   const isPaused = appState === 'paused';
@@ -101,7 +96,6 @@ const LiveAssistant: React.FC<LiveAssistantProps> = ({
     
     if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
     if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
 
     // Stop Audio Output Immediately
     stopAudioOutput();
@@ -167,15 +161,34 @@ const LiveAssistant: React.FC<LiveAssistantProps> = ({
     if (actionTrigger === 0 || !sessionPromiseRef.current || !isActive || isPaused) return;
 
     sessionPromiseRef.current.then(session => {
-        session.sendRealtimeInput({
-            text: `INTERACTION: The user tapped the screen for help. Warmly provide an update or reassurance based on the current ${mode} context.`
-        });
+        let prompt = `INTERACTION: The user performed a SINGLE TAP gesture.`;
+        if (mode === AppMode.NAVIGATION) prompt += " Tell them exactly what is immediately in front of them or update them on the path.";
+        if (mode === AppMode.READING) prompt += " Read any visible text immediately.";
+        if (mode === AppMode.OBJECT) prompt += " Describe the scene or objects in detail.";
+        
+        session.sendRealtimeInput({ text: prompt });
     }).catch(() => {});
   }, [actionTrigger, isActive, isPaused, mode]);
 
   const connect = async (isRetry = false) => {
-      if (cleanupInProgressRef.current) return;
-      if (!isActive) return;
+      // WAIT FOR CLEANUP TO FINISH if it's running. This prevents race conditions when restarting quickly.
+      if (cleanupInProgressRef.current) {
+          console.log("Cleanup in progress, waiting...");
+          await new Promise<void>(resolve => {
+              const check = setInterval(() => {
+                  if (!cleanupInProgressRef.current) {
+                      clearInterval(check);
+                      resolve();
+                  }
+              }, 50);
+          });
+      }
+
+      // Re-check state after waiting (state might have changed to stopping/idle)
+      const currentAppState = appStateRef.current;
+      const isStillActive = currentAppState === 'running' || currentAppState === 'starting' || currentAppState === 'paused';
+      
+      if (!isStillActive || !isMountedRef.current) return;
       
       isMountingRef.current = true;
       if (isRetry) onStatusChange('reconnecting');
@@ -198,7 +211,7 @@ const LiveAssistant: React.FC<LiveAssistantProps> = ({
             } 
         });
         
-        // Strict Race Condition Check: If we unmounted or stopped while getting media, abort immediately.
+        // Strict Race Condition Check
         if (!isMountedRef.current || !appStateRef.current || appStateRef.current === 'idle' || appStateRef.current === 'stopping') {
             mediaStream.getTracks().forEach(t => t.stop());
             if (inputAudioContextRef.current) inputAudioContextRef.current.close();
@@ -231,8 +244,8 @@ const LiveAssistant: React.FC<LiveAssistantProps> = ({
           },
           callbacks: {
             onopen: () => {
-              // Re-check mount/state status after connection established
-              if (!isMountedRef.current || (appStateRef.current !== 'running' && appStateRef.current !== 'starting' && appStateRef.current !== 'paused')) { 
+              const current = appStateRef.current;
+              if (!isMountedRef.current || (current !== 'running' && current !== 'starting' && current !== 'paused')) { 
                   cleanup(); 
                   return; 
               }
@@ -254,14 +267,11 @@ const LiveAssistant: React.FC<LiveAssistantProps> = ({
               processor.onaudioprocess = (e) => {
                 const current = appStateRef.current;
                 if (!isMountedRef.current) return;
-                
-                // Mute input ONLY when strictly paused, but ensure we don't process if stopped.
                 if (current !== 'running' && current !== 'starting' && current !== 'paused') return;
                 
                 const inputData = e.inputBuffer.getChannelData(0);
                 const pcmBlob = createPcmBlob(inputData);
                 sessionPromiseRef.current?.then(session => {
-                    // Check strict mount status again in async callback
                     if (isMountedRef.current) {
                         session.sendRealtimeInput({ media: pcmBlob });
                     }
@@ -278,7 +288,6 @@ const LiveAssistant: React.FC<LiveAssistantProps> = ({
                 const currentAppState = appStateRef.current;
                 if (currentAppState !== 'running' && currentAppState !== 'starting' && currentAppState !== 'paused') return;
 
-                // Handle Audio Output
                 const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
                 if (base64Audio && outputAudioContextRef.current) {
                     if (currentAppState !== 'paused') {
@@ -303,12 +312,10 @@ const LiveAssistant: React.FC<LiveAssistantProps> = ({
                         if (fc.name === 'changeMode') {
                             const newMode = fc.args.mode as AppMode;
                             onModeChange(newMode);
-                            // announce(`${newMode} mode selected.`); // Handled by App.tsx onModeChange
-                            // vibrate([50]);
                             sessionPromiseRef.current?.then(session => {
                                 if(isMountedRef.current) {
                                     session.sendToolResponse({
-                                        functionResponses: { id: fc.id, name: fc.name, response: { result: `Switched to ${newMode}. Speak warmly to the user.` } }
+                                        functionResponses: { id: fc.id, name: fc.name, response: { result: `Switched to ${newMode}. Speak warmly.` } }
                                     });
                                 }
                             });
@@ -341,14 +348,25 @@ const LiveAssistant: React.FC<LiveAssistantProps> = ({
                     stopAudioOutput();
                 }
             },
-            onclose: () => { if (isActive && isMountedRef.current) handleDisconnect(); },
-            onerror: (err) => { if (isActive && isMountedRef.current) handleDisconnect(); }
+            onclose: () => { 
+                // Always check current Ref state to decide if this was an error or a user action
+                const current = appStateRef.current;
+                const isStillActive = current === 'running' || current === 'starting' || current === 'paused';
+                if (isStillActive && isMountedRef.current) handleDisconnect(); 
+            },
+            onerror: (err) => { 
+                const current = appStateRef.current;
+                const isStillActive = current === 'running' || current === 'starting' || current === 'paused';
+                if (isStillActive && isMountedRef.current) handleDisconnect(); 
+            }
           }
         });
       } catch (err: any) {
         if (isMountedRef.current) {
             onError(err.message || "Failed to start camera or connection");
-            if (isActive) handleDisconnect();
+            const current = appStateRef.current;
+            const isStillActive = current === 'running' || current === 'starting' || current === 'paused';
+            if (isStillActive) handleDisconnect();
         }
       } finally {
         isMountingRef.current = false;
@@ -356,9 +374,17 @@ const LiveAssistant: React.FC<LiveAssistantProps> = ({
   };
 
   const handleDisconnect = () => {
-      if (!isActive || cleanupInProgressRef.current || !isMountedRef.current) return;
+      // Use Ref to ensure we don't reconnect if the user has already pressed stop
+      const current = appStateRef.current;
+      const isStillActive = current === 'running' || current === 'starting' || current === 'paused';
+      
+      if (!isStillActive || cleanupInProgressRef.current || !isMountedRef.current) return;
+      
       cleanup().then(() => {
         if (!isMountedRef.current) return;
+        // Double check state after cleanup
+        if (appStateRef.current === 'idle' || appStateRef.current === 'stopping') return;
+
         if (retryCountRef.current < MAX_RETRIES) {
             const delay = Math.pow(2, retryCountRef.current) * 1000;
             retryCountRef.current++;
@@ -374,7 +400,9 @@ const LiveAssistant: React.FC<LiveAssistantProps> = ({
                     onRetryUpdate("Connecting...");
                 } else { updateCountdown(); }
             }, 1000);
-            retryTimeoutRef.current = setTimeout(() => { if (isActive && isMountedRef.current) connect(true); }, delay);
+            retryTimeoutRef.current = setTimeout(() => { 
+                if (appStateRef.current !== 'idle' && isMountedRef.current) connect(true); 
+            }, delay);
         } else {
             onStatusChange('error');
             onError("I'm having trouble connecting to the network.");
@@ -396,9 +424,7 @@ const LiveAssistant: React.FC<LiveAssistantProps> = ({
         
         frameIntervalRef.current = window.setInterval(() => {
             if (!isMountedRef.current) return;
-            // Check Ref for current state
             const currentAppState = appStateRef.current;
-            // STOP streaming if paused or stopped
             if (currentAppState === 'paused' || currentAppState !== 'running') return; 
 
             const video = videoRef.current;
@@ -439,7 +465,6 @@ const LiveAssistant: React.FC<LiveAssistantProps> = ({
                         canvas.height = targetWidth * aspect;
                         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                         canvas.toBlob(async (blob) => {
-                            // Double check state before sending
                             if (blob && appStateRef.current === 'running' && isMountedRef.current) {
                                 const base64Data = await blobToBase64(blob);
                                 sessionPromiseRef.current?.then(session => {
@@ -455,81 +480,10 @@ const LiveAssistant: React.FC<LiveAssistantProps> = ({
         }, TICK_RATE); 
   };
 
-  // --- GESTURE HANDLING ---
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-      touchStartRef.current = {
-          x: e.touches[0].clientX,
-          y: e.touches[0].clientY,
-          time: Date.now()
-      };
-
-      // Detect Double Tap
-      const now = Date.now();
-      if (now - lastTapTimeRef.current < 300) {
-          onTogglePause();
-          // Reset
-          lastTapTimeRef.current = 0;
-          if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-          return;
-      }
-      lastTapTimeRef.current = now;
-
-      // Detect Long Press
-      longPressTimerRef.current = setTimeout(() => {
-          vibrate([50]);
-          onOpenSettings();
-          touchStartRef.current = null; // Invalidate current gesture so touchend doesn't fire swipe
-      }, 800);
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-      // Clear long press timer on release
-      if (longPressTimerRef.current) {
-          clearTimeout(longPressTimerRef.current);
-          longPressTimerRef.current = null;
-      }
-
-      if (!touchStartRef.current) return;
-      
-      const touchEnd = {
-          x: e.changedTouches[0].clientX,
-          y: e.changedTouches[0].clientY,
-          time: Date.now()
-      };
-      
-      const diffX = touchEnd.x - touchStartRef.current.x;
-      const diffY = touchEnd.y - touchStartRef.current.y;
-      const duration = touchEnd.time - touchStartRef.current.time;
-
-      // Swipe Detection (Must be quick and significant)
-      if (duration < 500 && Math.abs(diffX) > 80 && Math.abs(diffY) < 60) {
-          const modes = Object.values(AppMode);
-          const currentIndex = modes.indexOf(mode);
-          let newMode = mode;
-          
-          if (diffX < 0) { // Swipe Left -> Next
-              const nextIndex = (currentIndex + 1) % modes.length;
-              newMode = modes[nextIndex];
-          } else { // Swipe Right -> Prev
-              const prevIndex = (currentIndex - 1 + modes.length) % modes.length;
-              newMode = modes[prevIndex];
-          }
-          
-          if (newMode !== mode) {
-            vibrate([20]);
-            onModeChange(newMode);
-            // Announce handled by parent
-          }
-      }
-      touchStartRef.current = null;
-  };
-
   // Pause Effect
   useEffect(() => {
       if (isPaused) {
           stopAudioOutput();
-          // We do NOT disconnect session so we can still hear "Resume" commands via audio input
       }
   }, [isPaused, stopAudioOutput]);
 
@@ -549,10 +503,8 @@ const LiveAssistant: React.FC<LiveAssistantProps> = ({
   return (
     <div 
         className={`relative w-full h-full bg-black flex items-center justify-center overflow-hidden rounded-xl border-4 ${isPaused ? 'border-yellow-500' : 'border-slate-700'}`}
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-        role="application"
-        aria-label={`Camera View. Current mode: ${mode}. Double tap to ${isPaused ? 'resume' : 'pause'}. Swipe to change mode.`}
+        role="img"
+        aria-label={`Camera View. Current mode: ${mode}.`}
     >
       <video
         ref={videoRef}

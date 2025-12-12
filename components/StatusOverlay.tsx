@@ -21,7 +21,8 @@ const StatusOverlay: React.FC<StatusOverlayProps> = ({ status, errorMessage, ret
     };
   }, []);
 
-  if (status === 'connected' && !isOffline) return null;
+  // Return null if connected OR if intentionally disconnected (idle state)
+  if ((status === 'connected' || status === 'disconnected') && !isOffline) return null;
 
   return (
     <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/90 p-6 text-center" aria-live="assertive">

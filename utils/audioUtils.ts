@@ -93,6 +93,10 @@ export function playBeep(frequency: number = 440, type: OscillatorType = 'sine',
   }
 }
 
+export function playClick() {
+    playBeep(600, 'square', 0.05);
+}
+
 export function announce(text: string) {
   if ('speechSynthesis' in window) {
     // Cancel any current speech to ensure immediate feedback

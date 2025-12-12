@@ -2,34 +2,39 @@
 
 SightGuide AI is a warm, compassionate accessibility companion designed for visually impaired users. It utilizes the multimodal capabilities of the Google Gemini Live API to provide real-time, conversational audio guidance, acting as a "human-like" guide walking arm-in-arm with the user.
 
-## User Guide
+## Blind-First User Guide
 
-This application is designed with "Blind-First" principles, utilizing high-contrast visuals, large touch targets, and continuous audio feedback.
+This application is designed to be fully usable without seeing the screen. **The entire screen is a touch surface.**
 
-### Getting Started
-1.  **Launch**: Open the web application. You will hear: *"Hello there! I'm ready to help..."*
-2.  **Start Session**: The entire screen is a start button. **Double-tap anywhere** on the screen to open the camera and connect to the guide.
-3.  **Stop Session**: Locate the large red "STOP" button at the very bottom of the screen to end the connection.
+### 🖐️ Gesture Controls
+Do not look for buttons. Use the following gestures anywhere on the screen:
+
+*   **Double Tap**: **Start** the session (if stopped) or **Pause/Resume** (if running).
+*   **Single Tap**: **Ask** the AI to describe exactly what is in front of you right now (Primary Action).
+*   **Triple Tap**: **Emergency Stop**. Immediately cuts audio and connection.
+*   **Swipe Left / Right**: **Switch Modes** (Navigation ↔ Reading ↔ Object).
+*   **Long Press** (Hold 1s): Open **Settings**.
+
+### 🔊 Audio & Haptic Feedback
+Every interaction provides immediate feedback:
+*   **Clicks & Beeps**: Confirm gestures have been registered.
+*   **Vibration**: Distinct patterns for starting (two buzzes), stopping (long buzz), and errors.
+*   **Voice**: The assistant will explicitly announce mode changes ("Navigation Mode") and status ("Paused").
 
 ### The Three Modes
-SightGuide changes its personality based on your needs. You can switch modes using the buttons at the bottom of the screen or by **Swiping Left/Right**.
+SightGuide changes its personality based on your needs. Swipe Left or Right to cycle through them.
 
 1.  **Navigation Mode (Default)**: *Your Walking Companion*
     *   **Purpose**: Walking, avoiding obstacles, and orientation.
-    *   **Behavior**: Provides a "heartbeat" update every 3 seconds so you know you are connected. It will warn you of hazards like curbs or poles and confirm when the path is clear.
+    *   **Behavior**: Provides a "heartbeat" update every 3 seconds. It prioritizes hazards (curbs, poles) and path clarity.
 2.  **Reading Mode**: *Your Reader*
     *   **Purpose**: Reading mail, menus, signs, or screens.
-    *   **Behavior**: Automatically detects text. It handles page turns and will politely ask you to move the camera if text is cut off.
+    *   **Behavior**: Automatically detects and reads text. Polite and patient with page turns.
 3.  **Object Mode**: *Your Describer*
     *   **Purpose**: Finding lost items or exploring a room.
     *   **Behavior**: Describes the environment in detail ("There is a blue mug to your right") and helps you interact with objects.
 
-### Gestures & Controls
-*   **Pause/Resume**: **Double-tap** the center of the screen to pause the camera and silence the audio. Double-tap again to resume.
-*   **Switch Mode**: **Swipe Left** or **Swipe Right** across the screen.
-*   **Settings**: **Long-press** (hold down for 1 second) anywhere on the camera view to open the Settings menu.
-
-### Settings Menu
+### Settings Menu (Long Press)
 *   **High Contrast**: Toggles strictly Black & White visuals (Enabled by default).
 *   **Safe Mode**: Makes the AI extra cautious and verbose about safety hazards.
 *   **Voice Selection**: Choose from 5 distinct voices (Kore, Puck, Charon, Fenrir, Zephyr).
@@ -53,7 +58,7 @@ SightGuide changes its personality based on your needs. You can switch modes usi
     ```
 
 2.  **Installation**
-    Install the necessary dependencies (React, Google GenAI SDK).
+    Install the necessary dependencies.
     ```bash
     npm install
     ```
@@ -63,9 +68,9 @@ SightGuide changes its personality based on your needs. You can switch modes usi
     ```bash
     npm start
     ```
-    Open [http://localhost:3000](http://localhost:3000) (or the port specified by your bundler).
+    Open [http://localhost:3000](http://localhost:3000).
 
 ### Important Technical Notes
-*   **Browser Permissions**: The app requires `Camera` and `Microphone` access. Modern browsers only allow this on **Secure Contexts** (HTTPS) or `localhost`.
-*   **Audio Context**: The app uses the Web Audio API for real-time PCM audio streaming. Ensure the user interacts with the page (the "Double Tap to Start" screen) to unlock the AudioContext.
-*   **Model**: This app is hardcoded to use `gemini-2.5-flash-native-audio-preview-09-2025` to support low-latency bidirectional audio/video streaming.
+*   **Context**: The entire `App` container captures `onTouchStart` and `onTouchEnd` to calculate gesture duration and delta. Visual buttons use `e.stopPropagation()` to prevent conflict, but the app is fully functional via gestures alone.
+*   **Audio**: Uses Web Audio API for low-latency PCM streaming (16kHz input / 24kHz output).
+*   **Model**: Hardcoded to `gemini-2.5-flash-native-audio-preview-09-2025`.
