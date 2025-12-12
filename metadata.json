@@ -1,0 +1,8 @@
+{
+  "name": "SightGuide AI",
+  "description": "A comprehensive accessibility assistant for visually impaired users providing real-time visual interpretation, navigation assistance, and document reading using Gemini Live API.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
